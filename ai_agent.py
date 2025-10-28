@@ -2,11 +2,13 @@ from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Annotated
 from langchain_core.messages import BaseMessage
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
 import os
+import sqlite3
 
+con = sqlite3.connect(database='chat_bot_db',check_same_thread=False)
 load_dotenv()
 # LLM Configuration - DeepSeek R1 Distill Qwen 7B
 LLAMA_STUDIO_API_BASE = os.getenv("LLAMA_STUDIO_API_BASE", "http://localhost:1234/v1")
@@ -39,7 +41,7 @@ def chat_node(state: ChatState):
 
 
 # Checkpointer
-checkpointer = InMemorySaver()
+checkpointer = SqliteSaver(conn=con)
 
 graph = StateGraph(ChatState)
 graph.add_node("chat_node", chat_node)
@@ -47,3 +49,10 @@ graph.add_edge(START, "chat_node")
 graph.add_edge("chat_node", END)
 
 chatbot = graph.compile(checkpointer=checkpointer)
+
+def check_thread_data():
+    all_threads =set()
+    for checkpoint in checkpointer.list(None):
+        all_threads.add(checkpoint.config["configurable"]['thread_id']
+                    )
+    return list(all_threads)
