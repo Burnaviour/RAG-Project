@@ -15,4 +15,7 @@ dependencies = [
     "duckduckgo-search>=8.1.1",
     "langchain-community>=0.4",
     "ddgs>=9.6.1",
+    "langchain-huggingface>=1.0.0",
+    "scikit-learn>=1.7.2",
+    "sentence-transformers>=5.1.2",
 ]
