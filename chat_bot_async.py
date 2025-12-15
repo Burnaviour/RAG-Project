@@ -11,8 +11,24 @@ from dotenv import load_dotenv
 import sqlite3
 import requests
 import os
-
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
 load_dotenv()
+
+client = MultiServerMCPClient(
+    {
+        "arith": {
+            "transport": "stdio",
+            "command": "python3",
+            "args": ["/home/burnaviour/LANGRAG/mcp_server_main.py"],
+        },
+        # "expense": {
+        #     "transport": "streamable_http",  # if this fails, try "sse"
+        #     "url": "https://splendid-gold-dingo.fastmcp.app/mcp"
+        # }
+    }
+)
+
 
 # -------------------
 # 1. LLM
@@ -83,51 +99,45 @@ def get_stock_price(symbol: str) -> dict:
 
 
 
-tools = [search_tool, get_stock_price, calculator]
-llm_with_tools = llm.bind_tools(tools)
 
-# -------------------
-# 3. State
-# -------------------
+
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-# -------------------
-# 4. Nodes
-# -------------------
-def chat_node(state: ChatState):
-    """LLM node that may answer or request a tool call."""
-    messages = state["messages"]
-    response = llm_with_tools.invoke(messages)
-    return {"messages": [response]}
 
-tool_node = ToolNode(tools)
 
-# -------------------
-# 5. Checkpointer
-# -------------------
-conn = sqlite3.connect(database="chatbot.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn=conn)
+async def build_graph():
 
-# -------------------
-# 6. Graph
-# -------------------
-graph = StateGraph(ChatState)
-graph.add_node("chat_node", chat_node)
-graph.add_node("tools", tool_node)
+    tools = await client.get_tools()
+    print(tools)
+    llm_with_tools = llm.bind_tools(tools)
+    chatbot = ''
+    async def chat_node(state: ChatState):
+        """LLM node that may answer or request a tool call."""
+        messages = state["messages"]
+        response = await llm_with_tools.ainvoke(messages)
+        return {"messages": [response]}
 
-graph.add_edge(START, "chat_node")
+    tool_node = ToolNode(tools)
 
-graph.add_conditional_edges("chat_node",tools_condition)
-graph.add_edge('tools', 'chat_node')
+    graph = StateGraph(ChatState)
+    graph.add_node("chat_node", chat_node)
+    graph.add_node("tools", tool_node)
 
-chatbot = graph.compile(checkpointer=checkpointer)
+    graph.add_edge(START, "chat_node")
 
-# -------------------
-# 7. Helper
-# -------------------
-def retrieve_all_threads():
-    all_threads = set()
-    for checkpoint in checkpointer.list(None):
-        all_threads.add(checkpoint.config["configurable"]["thread_id"])
-    return list(all_threads)
+    graph.add_conditional_edges("chat_node",tools_condition)
+    graph.add_edge('tools', 'chat_node')
+
+    chatbot = graph.compile()
+    return chatbot
+
+async def main():
+    chat_bot = await build_graph()
+    res =await chat_bot.ainvoke({"messages":[HumanMessage(content="Find the modulus of 5 and 23 and give answer like a cricket commentator.")]})
+
+    print(res['messages'][-1].content)
+
+if __name__ == '__main__':
+    asyncio.run(main())
+
